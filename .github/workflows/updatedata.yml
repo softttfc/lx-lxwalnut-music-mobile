@@ -1,0 +1,60 @@
+name: 定时同步各平台上游仓库
+on:
+  schedule:
+    # 每天 UTC 0:00 → 北京时间 8:00
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动触发
+# ========= 全局变量：改这里即可，适配各个平台 =========
+env:
+  # 上游仓库地址（Gitee 或 GitHub 都行）
+  UPSTREAM_REPO: https://github.com/WalnutBai/lx-lxwalnut-music-mobile.git
+  # 上游分支  main / master
+  UPSTREAM_BRANCH: main
+  # 你当前仓库要同步到的分支
+  TARGET_BRANCH: main
+  # 远程名称，随便取，避免和 origin 冲突
+  UPSTREAM_REMOTE: upstream
+# =======================================
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出当前仓库
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+      - name: 配置 Git 用户
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+      - name: 添加上游远程
+        run: |
+          git remote add ${{ env.UPSTREAM_REMOTE }} ${{ env.UPSTREAM_REPO }}
+          git remote -v
+      - name: 拉取上游更新
+        id: fetch
+        run: |
+          if git fetch ${{ env.UPSTREAM_REMOTE }} ${{ env.UPSTREAM_BRANCH }}; then
+            echo "ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "上游仓库不可用，跳过本次同步。"
+          fi
+      - name: 合并上游更新
+        if: steps.fetch.outputs.ok == 'true'
+        run: |
+          git merge ${{ env.UPSTREAM_REMOTE }}/${{ env.UPSTREAM_BRANCH }} \
+            --allow-unrelated-histories \
+            -m "chore: sync from upstream $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || {
+              echo "合并失败，可能存在冲突。"
+              git status
+              exit 1
+            }
+      - name: 推送到当前仓库
+        if: steps.fetch.outputs.ok == 'true'
+        run: |
+          git push origin ${{ env.TARGET_BRANCH }}
+
